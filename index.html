@@ -1,130 +1,221 @@
 <!doctype html>
-<html lang="en">
+<html lang="uz">
 <head>
-    <meta charset="utf-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <link rel="stylesheet" href="./resources/ol.css">
-    <link rel="stylesheet" href="resources/fontawesome-all.min.css">
-    <link rel="stylesheet" href="./resources/ol-layerswitcher.css">
-    <link rel="stylesheet" href="./resources/qgis2web.css">
-    <meta name="viewport" content="initial-scale=1,user-scalable=no,maximum-scale=1,width=device-width">
-    <title>QGIS2Web Portal (Optimized)</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QGIS2Web Portal (Optimized)</title>
+  <link rel="stylesheet" href="./resources/ol.css">
+  <link rel="stylesheet" href="./resources/ol-layerswitcher.css">
+  <link rel="stylesheet" href="resources/fontawesome-all.min.css">
 
-    <style>
-        html, body, #map {
-            width: 100%;
-            height: 100%;
-            margin: 0;
-            padding: 0;
-            background: #fff;
-        }
-    </style>
+  <style>
+    html, body, #map {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background: #fff;
+    }
+    .ol-popup {
+      position: absolute;
+      background-color: white;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+      padding: 10px;
+      border-radius: 10px;
+      border: 1px solid #cccccc;
+      bottom: 12px;
+      left: -50px;
+      min-width: 250px;
+    }
+    .ol-popup-closer {
+      text-decoration: none;
+      position: absolute;
+      top: 2px;
+      right: 8px;
+    }
+  </style>
 </head>
 <body>
 <div id="map"></div>
 
-<!-- OpenLayers va kerakli kutubxonalar -->
+<!-- Popup -->
+<div id="popup" class="ol-popup">
+  <a href="#" id="popup-closer" class="ol-popup-closer">✖</a>
+  <div id="popup-content"></div>
+</div>
+
 <script src="./resources/ol.js"></script>
 <script src="./resources/ol-layerswitcher.js"></script>
 <script src="./resources/Autolinker.min.js"></script>
 
 <script>
-const map = new ol.Map({
-    target: 'map',
-    layers: [
-        new ol.layer.Tile({ source: new ol.source.OSM() })
-    ],
-    view: new ol.View({
-        center: ol.proj.fromLonLat([71.106, 40.439]),
-        zoom: 10
-    })
+// ======================
+// 🗺️ Asosiy qatlamlar
+// ======================
+const googleLayer = new ol.layer.Tile({
+  title: 'Google Satellite',
+  type: 'base',
+  source: new ol.source.XYZ({
+    url: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+    crossOrigin: 'anonymous'
+  })
 });
 
-// LayerSwitcher
+const osmFallback = new ol.layer.Tile({
+  title: 'OpenStreetMap (fallback)',
+  visible: false,
+  source: new ol.source.OSM({ crossOrigin: 'anonymous' })
+});
+
+// Google ishlamasa – fallback
+googleLayer.getSource().on('tileloaderror', function() {
+  console.warn('Google tile yuklanmadi, OSMga o‘tildi.');
+  googleLayer.setVisible(false);
+  osmFallback.setVisible(true);
+});
+
+// ======================
+// 🧭 Xarita
+// ======================
+const map = new ol.Map({
+  target: 'map',
+  layers: [googleLayer, osmFallback],
+  view: new ol.View({
+    center: ol.proj.fromLonLat([71.106, 40.439]),
+    zoom: 11
+  })
+});
+
+// ======================
+// 🧩 Lazy GeoJSON yuklovchi funksiya
+// ======================
+function loadGeoJSONLayer(url, layerName, color) {
+  const vectorSource = new ol.source.Vector({
+    format: new ol.format.GeoJSON(),
+    loader: function(extent) {
+      fetch(url)
+        .then(res => res.json())
+        .then(data => {
+          const features = new ol.format.GeoJSON().readFeatures(data, {
+            dataProjection: 'EPSG:4326',
+            featureProjection: 'EPSG:3857'
+          });
+          this.addFeatures(features);
+        })
+        .catch(err => console.error("Yuklanmadi:", url, err));
+    },
+    strategy: ol.loadingstrategy.bbox
+  });
+
+  const vectorLayer = new ol.layer.Vector({
+    title: layerName,
+    source: vectorSource,
+    style: new ol.style.Style({
+      stroke: new ol.style.Stroke({ color, width: 1 }),
+      fill: new ol.style.Fill({ color: color.replace('1)', '0.2)') })
+    }),
+    declutter: true,
+    visible: true
+  });
+
+  map.addLayer(vectorLayer);
+  return vectorLayer;
+}
+
+// ======================
+// 🗂️ Qatlamlar
+// ======================
+loadGeoJSONLayer("layers/__1.geojson", "1-qavat", "rgba(0,0,255,1)");
+loadGeoJSONLayer("layers/22_2.geojson", "2-qavat", "rgba(0,255,0,1)");
+loadGeoJSONLayer("layers/21072025_3.geojson", "3-qavat", "rgba(255,0,0,1)");
+
+// ======================
+// 📍 LayerSwitcher
+// ======================
 const layerSwitcher = new ol.control.LayerSwitcher({
-    tipLabel: 'Qatlamlarni tanlash',
-    groupSelectStyle: 'children'
+  tipLabel: 'Qatlamlarni tanlash',
+  groupSelectStyle: 'children'
 });
 map.addControl(layerSwitcher);
 
-// GeoJSON yuklovchi funksiya
-function loadGeoJSONLayer(url, layerName, style) {
-    fetch(url)
-        .then(res => res.json())
-        .then(data => {
-            const layer = new ol.layer.Vector({
-                title: layerName,
-                source: new ol.source.Vector({
-                    features: new ol.format.GeoJSON().readFeatures(data, {
-                        featureProjection: 'EPSG:3857'
-                    })
-                }),
-                style: style
-            });
-            map.addLayer(layer);
-        })
-        .catch(err => console.error("Yuklanmadi:", url, err));
-}
+// ======================
+// 💬 Popup (xususiyatlarni ko‘rsatadi)
+// ======================
+const container = document.getElementById('popup');
+const content = document.getElementById('popup-content');
+const closer = document.getElementById('popup-closer');
 
-// Qatlamlarni dinamik yuklash
-loadGeoJSONLayer("layers/__1.geojson", "1-qavat", new ol.style.Style({
-    stroke: new ol.style.Stroke({ color: 'blue', width: 1 }),
-    fill: new ol.style.Fill({ color: 'rgba(0,0,255,0.1)' })
-}));
+const overlay = new ol.Overlay({
+  element: container,
+  autoPan: { animation: { duration: 250 } }
+});
+map.addOverlay(overlay);
 
-loadGeoJSONLayer("layers/22_2.geojson", "2-qavat", new ol.style.Style({
-    stroke: new ol.style.Stroke({ color: 'green', width: 1 }),
-    fill: new ol.style.Fill({ color: 'rgba(0,255,0,0.1)' })
-}));
+closer.onclick = function() {
+  overlay.setPosition(undefined);
+  closer.blur();
+  return false;
+};
 
-loadGeoJSONLayer("layers/21072025_3.geojson", "3-qavat", new ol.style.Style({
-    stroke: new ol.style.Stroke({ color: 'red', width: 1 }),
-    fill: new ol.style.Fill({ color: 'rgba(255,0,0,0.1)' })
-}));
+map.on('singleclick', function(evt) {
+  const feature = map.forEachFeatureAtPixel(evt.pixel, f => f);
+  if (feature) {
+    const props = feature.getProperties();
+    delete props.geometry;
+    const html = Object.entries(props)
+      .map(([k,v]) => `<strong>${k}</strong>: ${v}`)
+      .join('<br>');
+    content.innerHTML = html || "Ma'lumot yo‘q";
+    overlay.setPosition(evt.coordinate);
+  } else {
+    overlay.setPosition(undefined);
+  }
+});
 
-// "Mening joyim" tugmasi
+// ======================
+// 📡 Mening joyim tugmasi
+// ======================
 class MyLocationControl extends ol.control.Control {
-    constructor(opt_options) {
-        const options = opt_options || {};
-        const button = document.createElement('button');
-        button.innerHTML = '<i class="fas fa-location-arrow"></i>';
-        button.title = 'Mening joyim';
-        const element = document.createElement('div');
-        element.className = 'ol-control ol-unselectable';
-        element.style.top = '65px';
-        element.style.left = '5px';
-        element.style.position = 'absolute';
-        element.appendChild(button);
-        super({ element: element, target: options.target });
-        button.addEventListener('click', this.handleLocate.bind(this), false);
+  constructor(opt_options) {
+    const options = opt_options || {};
+    const button = document.createElement('button');
+    button.innerHTML = '<i class="fas fa-location-arrow"></i>';
+    button.title = 'Mening joyim';
+    const element = document.createElement('div');
+    element.className = 'ol-control ol-unselectable';
+    element.style.top = '65px';
+    element.style.left = '5px';
+    element.style.position = 'absolute';
+    element.appendChild(button);
+    super({ element, target: options.target });
+    button.addEventListener('click', this.locate.bind(this), false);
+  }
+
+  locate() {
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(pos => {
+        const coords = ol.proj.fromLonLat([pos.coords.longitude, pos.coords.latitude]);
+        if (!window.userMarker) {
+          window.userMarker = new ol.Feature({ geometry: new ol.geom.Point(coords) });
+          window.userMarker.setStyle(new ol.style.Style({
+            image: new ol.style.Circle({
+              radius: 6,
+              fill: new ol.style.Fill({ color: 'blue' }),
+              stroke: new ol.style.Stroke({ color: 'white', width: 2 })
+            })
+          }));
+          const vectorSource = new ol.source.Vector({ features: [window.userMarker] });
+          window.userLayer = new ol.layer.Vector({ source: vectorSource });
+          map.addLayer(window.userLayer);
+        } else {
+          window.userMarker.getGeometry().setCoordinates(coords);
+        }
+        map.getView().animate({ center: coords, zoom: 15 });
+      }, err => alert("Joylashuv aniqlanmadi: " + err.message));
+    } else {
+      alert("Brauzeringiz geolokatsiyani qo‘llamaydi.");
     }
-    handleLocate() {
-        if ("geolocation" in navigator) {
-            navigator.geolocation.getCurrentPosition((pos) => {
-                const lon = pos.coords.longitude;
-                const lat = pos.coords.latitude;
-                const coords = ol.proj.fromLonLat([lon, lat]);
-                if (!window.userMarker) {
-                    window.userMarker = new ol.Feature({
-                        geometry: new ol.geom.Point(coords)
-                    });
-                    window.userMarker.setStyle(new ol.style.Style({
-                        image: new ol.style.Circle({
-                            radius: 6,
-                            fill: new ol.style.Fill({ color: 'blue' }),
-                            stroke: new ol.style.Stroke({ color: 'white', width: 2 })
-                        })
-                    }));
-                    const vectorSource = new ol.source.Vector({ features: [window.userMarker] });
-                    window.userLayer = new ol.layer.Vector({ source: vectorSource });
-                    map.addLayer(window.userLayer);
-                } else {
-                    window.userMarker.getGeometry().setCoordinates(coords);
-                }
-                map.getView().animate({ center: coords, zoom: 16 });
-            }, (err) => alert("Joylashuv aniqlanmadi: " + err.message));
-        } else alert("Brauzer geolokatsiyani qo‘llamaydi.");
-    }
+  }
 }
 map.addControl(new MyLocationControl());
 </script>
